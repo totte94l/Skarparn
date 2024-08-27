@@ -41,7 +41,11 @@ const scrapeStores = async (searchTerm) => {
 
     console.log("Startar..")
 
+    let currentStore = 0;
+    let maxStores = stores.length
     for (const store of stores) {
+        console.log(store.name)
+        console.log(currentStore + " av " + maxStores)
         const products = await fetchProductsForStore(store.accountId, searchTerm);
         if (products.length > 0) {
             products.forEach((product) => {
