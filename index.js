@@ -7,7 +7,8 @@ const { scrapeStores } = require('./scraper');
 
 const allowedOrigins = [
     'http://localhost:5173', // For local development
-    'https://your-frontend-domain.com' // Replace with your actual frontend domain
+    'https://icabotten.cajander.nu',
+    'https://cjnicabotten.netlify.app'
 ];
 
 app.use(cors({
