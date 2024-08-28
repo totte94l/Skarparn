@@ -1,10 +1,13 @@
-const axios = require('axios');
-const cheerio = require('cheerio');
-const createCsvWriter = require('csv-writer').createObjectCsvWriter;
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+import { createObjectCsvWriter } from 'csv-writer';
+import pLimit from 'p-limit';
 
 const STORE_LIST_URL = 'https://handla.ica.se/api/store/v1?&customerType=B2C&deliveryMethods=PICKUP,HOME_DELIVERY';
 
-// Function to fetch the list of stores
+// Limit the number of concurrent requests to 5
+const limit = pLimit(5);
+
 const fetchStores = async () => {
     try {
         const response = await axios.get(STORE_LIST_URL);
@@ -15,7 +18,6 @@ const fetchStores = async () => {
     }
 };
 
-// Function to fetch products for a specific store with retry logic
 const fetchProductsForStore = async (accountId, searchTerm, retries = 3, delay = 1000) => {
     const searchUrl = `https://handlaprivatkund.ica.se/stores/${accountId}/search?q=${encodeURIComponent(searchTerm)}`;
 
@@ -36,52 +38,54 @@ const fetchProductsForStore = async (accountId, searchTerm, retries = 3, delay =
         } catch (error) {
             console.error(`Error fetching products for store ${accountId} (Attempt ${attempt}/${retries}):`, error.message);
 
-            // If we've exhausted the retries, return an empty array
             if (attempt === retries) {
                 return [];
             }
 
-            // Wait for a delay before retrying
             await new Promise((resolve) => setTimeout(resolve, delay * attempt)); // Exponential backoff
         }
     }
 };
 
-// Function to scrape all stores concurrently
-const scrapeStores = async (searchTerm) => {
+// Scrape all stores with controlled concurrency
+export const scrapeStores = async (searchTerm) => {
     const stores = await fetchStores();
-    const results = [];
+    const results = [];  // Properly initialize results array
 
     console.log("Starting scraping...");
 
-    const fetchPromises = stores.map(async (store, index) => {
-        console.log(`${store.name} (${index + 1} of ${stores.length})`);
-        const products = await fetchProductsForStore(store.accountId, searchTerm);
-        if (products.length > 0) {
-            products.forEach((product) => {
-                results.push({
+    const csvWriter = createObjectCsvWriter({
+        path: 'store_products.csv',
+        header: [
+            { id: 'Storename', title: 'Storename' },
+            { id: 'storeFormat', title: 'storeFormat' },
+            { id: 'ProductName', title: 'ProductName' },
+        ],
+        append: true // Append mode to write incrementally
+    });
+
+    // Process stores with limited concurrency
+    const fetchPromises = stores.map((store, index) =>
+        limit(async () => {
+            console.log(`${store.name} (${index + 1} of ${stores.length})`);
+            const products = await fetchProductsForStore(store.accountId, searchTerm);
+            if (products.length > 0) {
+                const records = products.map((product) => ({
                     Storename: store.name,
                     storeFormat: store.storeFormat,
                     ProductName: product,
-                });
-            });
-        }
-    });
+                }));
+                
+                results.push(...records);  // Collect results in memory
+                
+                await csvWriter.writeRecords(records);  // Write to CSV incrementally
+            }
+        })
+    );
 
-    // Run all fetches concurrently
     await Promise.all(fetchPromises);
-    console.log("Scraping completed");
-    return results;
+
+    console.log('Scraping completed.');
+
+    return results; // Return the collected results
 };
-
-
-module.exports = {
-    scrapeStores
-};
-
-// Example usage
-/* (async () => {
-    const searchTerm = 'Coca Cola';  // replace with your search term
-    const results = await scrapeStores(searchTerm);
-    await writeResultsToCsv(results);
-})(); */

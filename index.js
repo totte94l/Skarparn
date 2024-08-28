@@ -1,12 +1,12 @@
-const express = require('express');
+import express from 'express';
+import cors from 'cors';
+import { scrapeStores } from './scraper.js';  // Correct import
+
 const app = express();
 const port = process.env.PORT || 3000;
-var cors = require('cors')
-
-const { scrapeStores } = require('./scraper');
 
 const allowedOrigins = [
-    'http://localhost:5173', // For local development
+    'http://localhost:5173', 
     'https://icabotten.cajander.nu',
     'https://cjnicabotten.netlify.app'
 ];
@@ -21,7 +21,6 @@ app.use(cors({
     }
 }));
 
-
 app.get('/api/scrape', async (req, res) => {
     const { products } = req.query;
 
@@ -34,7 +33,9 @@ app.get('/api/scrape', async (req, res) => {
 
     for (const product of productArray) {
         const results = await scrapeStores(product.trim());
-        allResults.push(...results);
+        if (results) {
+            allResults.push(...results);
+        }
     }
 
     res.json({ message: 'Scraping completed', results: allResults });
