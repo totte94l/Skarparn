@@ -4,6 +4,7 @@ const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 
 const STORE_LIST_URL = 'https://handla.ica.se/api/store/v1?&customerType=B2C&deliveryMethods=PICKUP,HOME_DELIVERY';
 
+// Function to fetch the list of stores
 const fetchStores = async () => {
     try {
         const response = await axios.get(STORE_LIST_URL);
@@ -14,38 +15,47 @@ const fetchStores = async () => {
     }
 };
 
-const fetchProductsForStore = async (accountId, searchTerm) => {
-    try {
-        const searchUrl = `https://handlaprivatkund.ica.se/stores/${accountId}/search?q=${encodeURIComponent(searchTerm)}`;
-        const response = await axios.get(searchUrl);
-        const $ = cheerio.load(response.data);
-        const products = [];
+// Function to fetch products for a specific store with retry logic
+const fetchProductsForStore = async (accountId, searchTerm, retries = 3, delay = 1000) => {
+    const searchUrl = `https://handlaprivatkund.ica.se/stores/${accountId}/search?q=${encodeURIComponent(searchTerm)}`;
 
-        $('div.product-card-container').each((index, element) => {
-            const productName = $(element).find('h3._text_f6lbl_1._text--m_f6lbl_23').text().trim();
-            if (productName) {
-                products.push(productName);
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            const response = await axios.get(searchUrl);
+            const $ = cheerio.load(response.data);
+            const products = [];
+
+            $('div.product-card-container').each((index, element) => {
+                const productName = $(element).find('h3._text_f6lbl_1._text--m_f6lbl_23').text().trim();
+                if (productName) {
+                    products.push(productName);
+                }
+            });
+
+            return products;
+        } catch (error) {
+            console.error(`Error fetching products for store ${accountId} (Attempt ${attempt}/${retries}):`, error.message);
+
+            // If we've exhausted the retries, return an empty array
+            if (attempt === retries) {
+                return [];
             }
-        });
 
-        return products;
-    } catch (error) {
-        console.error(`Error fetching products for store ${accountId}:`, error);
-        return [];
+            // Wait for a delay before retrying
+            await new Promise((resolve) => setTimeout(resolve, delay * attempt)); // Exponential backoff
+        }
     }
 };
 
+// Function to scrape all stores concurrently
 const scrapeStores = async (searchTerm) => {
     const stores = await fetchStores();
     const results = [];
 
-    console.log("Startar..")
+    console.log("Starting scraping...");
 
-    let currentStore = 0;
-    let maxStores = stores.length
-    for (const store of stores) {
-        console.log(store.name)
-        console.log(currentStore + " av " + maxStores)
+    const fetchPromises = stores.map(async (store, index) => {
+        console.log(`${store.name} (${index + 1} of ${stores.length})`);
         const products = await fetchProductsForStore(store.accountId, searchTerm);
         if (products.length > 0) {
             products.forEach((product) => {
@@ -56,34 +66,18 @@ const scrapeStores = async (searchTerm) => {
                 });
             });
         }
-    }
+    });
 
+    // Run all fetches concurrently
+    await Promise.all(fetchPromises);
+    console.log("Scraping completed");
     return results;
 };
 
-const writeResultsToCsv = async (results) => {
-    const csvWriter = createCsvWriter({
-        path: 'store_products.csv',
-        header: [
-            { id: 'Storename', title: 'Storename' },
-            { id: 'storeFormat', title: 'storeFormat' },
-            { id: 'ProductName', title: 'ProductName' },
-        ],
-    });
-
-    try {
-        await csvWriter.writeRecords(results);
-        console.log('CSV file written successfully');
-    } catch (error) {
-        console.error('Error writing CSV file:', error);
-    }
-};
 
 module.exports = {
-    scrapeStores,
-    writeResultsToCsv,
+    scrapeStores
 };
-
 
 // Example usage
 /* (async () => {
